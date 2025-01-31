@@ -98,6 +98,7 @@
                 "userName": "Usuário",
                 "isAdmin": "Admin?",
                 "lastLoginAt": "Últ. Login",
+                "lastAccessAt": "Últ. Acesso",
                 "updatedAt": "Últ. Atualização",
                 "name": "Nome",
                 "password": "Senha",
@@ -211,7 +212,8 @@
             "password": "Senha",
             "sign_in": "Entrar",
             "sign_in_error": "Erro na autenticação, tente novamente.",
-            "logout": "Sair"
+            "logout": "Sair",
+            "insightsCollectionNote": "Navidrome coleta dados de uso anônimos para\najudar a melhorar o projeto. Clique [aqui] para\nsaber mais e para desativar se desejar"
         },
         "validation": {
             "invalidChars": "Somente use letras e numeros",
@@ -387,6 +389,7 @@
                 "language": "Língua",
                 "defaultView": "Tela inicial",
                 "desktop_notifications": "Notificações",
+                "lastfmNotConfigured": "A API-Key do Last.fm não está configurada",
                 "lastfmScrobbling": "Enviar scrobbles para Last.fm",
                 "listenBrainzScrobbling": "Enviar scrobbles para ListenBrainz",
                 "replaygain": "Modo ReplayGain",
@@ -432,7 +435,12 @@
         "links": {
             "homepage": "Website",
             "source": "Código fonte",
-            "featureRequests": "Solicitar funcionalidade"
+            "featureRequests": "Solicitar funcionalidade",
+            "lastInsightsCollection": "Última coleta de dados",
+            "insights": {
+                "disabled": "Desligado",
+                "waiting": "Aguardando"
+            }
         }
     },
     "activity": {

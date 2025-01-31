@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -143,7 +144,7 @@ func createAdminUser(ctx context.Context, ds model.DataStore, username, password
 		Email:       "",
 		NewPassword: password,
 		IsAdmin:     true,
-		LastLoginAt: now,
+		LastLoginAt: &now,
 	}
 	err := ds.User(ctx).Put(&initialUser)
 	if err != nil {
@@ -170,17 +171,17 @@ func validateLogin(userRepo model.UserRepository, userName, password string) (*m
 	return u, nil
 }
 
-// This method maps the custom authorization header to the default 'Authorization', used by the jwtauth library
-func authHeaderMapper(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bearer := r.Header.Get(consts.UIAuthorizationHeader)
-		r.Header.Set("Authorization", bearer)
-		next.ServeHTTP(w, r)
-	})
+func jwtVerifier(next http.Handler) http.Handler {
+	return jwtauth.Verify(auth.TokenAuth, tokenFromHeader, jwtauth.TokenFromCookie, jwtauth.TokenFromQuery)(next)
 }
 
-func jwtVerifier(next http.Handler) http.Handler {
-	return jwtauth.Verify(auth.TokenAuth, jwtauth.TokenFromHeader, jwtauth.TokenFromCookie, jwtauth.TokenFromQuery)(next)
+func tokenFromHeader(r *http.Request) string {
+	// Get token from authorization header.
+	bearer := r.Header.Get(consts.UIAuthorizationHeader)
+	if len(bearer) > 7 && strings.ToUpper(bearer[0:6]) == "BEARER" {
+		return bearer[7:]
+	}
+	return ""
 }
 
 func UsernameFromToken(r *http.Request) string {
@@ -196,8 +197,13 @@ func UsernameFromReverseProxyHeader(r *http.Request) string {
 	if conf.Server.ReverseProxyWhitelist == "" {
 		return ""
 	}
-	if !validateIPAgainstList(r.RemoteAddr, conf.Server.ReverseProxyWhitelist) {
-		log.Warn(r.Context(), "IP is not whitelisted for reverse proxy login", "ip", r.RemoteAddr)
+	reverseProxyIp, ok := request.ReverseProxyIpFrom(r.Context())
+	if !ok {
+		log.Error("ReverseProxyWhitelist enabled but no proxy IP found in request context. Please report this error.")
+		return ""
+	}
+	if !validateIPAgainstList(reverseProxyIp, conf.Server.ReverseProxyWhitelist) {
+		log.Warn(r.Context(), "IP is not whitelisted for reverse proxy login", "proxy-ip", reverseProxyIp, "client-ip", r.RemoteAddr)
 		return ""
 	}
 	username := r.Header.Get(conf.Server.ReverseProxyUserHeader)
@@ -320,6 +326,14 @@ func validateIPAgainstList(ip string, comaSeparatedList string) bool {
 		return false
 	}
 
+	cidrs := strings.Split(comaSeparatedList, ",")
+
+	// Per https://github.com/golang/go/issues/49825, the remote address
+	// on a unix socket is '@'
+	if ip == "@" && strings.HasPrefix(conf.Server.Address, "unix:") {
+		return slices.Contains(cidrs, "@")
+	}
+
 	if net.ParseIP(ip) == nil {
 		ip, _, _ = net.SplitHostPort(ip)
 	}
@@ -328,7 +342,6 @@ func validateIPAgainstList(ip string, comaSeparatedList string) bool {
 		return false
 	}
 
-	cidrs := strings.Split(comaSeparatedList, ",")
 	testedIP, _, err := net.ParseCIDR(fmt.Sprintf("%s/32", ip))
 
 	if err != nil {

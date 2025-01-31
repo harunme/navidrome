@@ -1,28 +1,30 @@
 package subsonic
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/request"
 	"github.com/navidrome/navidrome/server/subsonic/responses"
-	"github.com/navidrome/navidrome/utils"
+	"github.com/navidrome/navidrome/utils/req"
+	"github.com/navidrome/navidrome/utils/slice"
 )
 
 func (api *Router) GetBookmarks(r *http.Request) (*responses.Subsonic, error) {
 	user, _ := request.UserFrom(r.Context())
 
 	repo := api.ds.MediaFile(r.Context())
-	bmks, err := repo.GetBookmarks()
+	bookmarks, err := repo.GetBookmarks()
 	if err != nil {
 		return nil, err
 	}
 
 	response := newResponse()
 	response.Bookmarks = &responses.Bookmarks{}
-	for _, bmk := range bmks {
-		b := responses.Bookmark{
+	response.Bookmarks.Bookmark = slice.Map(bookmarks, func(bmk model.Bookmark) responses.Bookmark {
+		return responses.Bookmark{
 			Entry:    childFromMediaFile(r.Context(), bmk.Item),
 			Position: bmk.Position,
 			Username: user.UserName,
@@ -30,19 +32,19 @@ func (api *Router) GetBookmarks(r *http.Request) (*responses.Subsonic, error) {
 			Created:  bmk.CreatedAt,
 			Changed:  bmk.UpdatedAt,
 		}
-		response.Bookmarks.Bookmark = append(response.Bookmarks.Bookmark, b)
-	}
+	})
 	return response, nil
 }
 
 func (api *Router) CreateBookmark(r *http.Request) (*responses.Subsonic, error) {
-	id, err := requiredParamString(r, "id")
+	p := req.Params(r)
+	id, err := p.String("id")
 	if err != nil {
 		return nil, err
 	}
 
-	comment := utils.ParamString(r, "comment")
-	position := utils.ParamInt64(r, "position", 0)
+	comment, _ := p.String("comment")
+	position := p.Int64Or("position", 0)
 
 	repo := api.ds.MediaFile(r.Context())
 	err = repo.AddBookmark(id, comment, position)
@@ -53,7 +55,8 @@ func (api *Router) CreateBookmark(r *http.Request) (*responses.Subsonic, error) 
 }
 
 func (api *Router) DeleteBookmark(r *http.Request) (*responses.Subsonic, error) {
-	id, err := requiredParamString(r, "id")
+	p := req.Params(r)
+	id, err := p.String("id")
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +74,16 @@ func (api *Router) GetPlayQueue(r *http.Request) (*responses.Subsonic, error) {
 
 	repo := api.ds.PlayQueue(r.Context())
 	pq, err := repo.Retrieve(user.ID)
-	if err != nil {
+	if err != nil && !errors.Is(err, model.ErrNotFound) {
 		return nil, err
+	}
+	if pq == nil || len(pq.Items) == 0 {
+		return newResponse(), nil
 	}
 
 	response := newResponse()
 	response.PlayQueue = &responses.PlayQueue{
-		Entry:     childrenFromMediaFiles(r.Context(), pq.Items),
+		Entry:     slice.MapWithArg(pq.Items, r.Context(), childFromMediaFile),
 		Current:   pq.Current,
 		Position:  pq.Position,
 		Username:  user.UserName,
@@ -88,13 +94,10 @@ func (api *Router) GetPlayQueue(r *http.Request) (*responses.Subsonic, error) {
 }
 
 func (api *Router) SavePlayQueue(r *http.Request) (*responses.Subsonic, error) {
-	ids, err := requiredParamStrings(r, "id")
-	if err != nil {
-		return nil, err
-	}
-
-	current := utils.ParamString(r, "current")
-	position := utils.ParamInt64(r, "position", 0)
+	p := req.Params(r)
+	ids, _ := p.Strings("id")
+	current, _ := p.String("current")
+	position := p.Int64Or("position", 0)
 
 	user, _ := request.UserFrom(r.Context())
 	client, _ := request.ClientFrom(r.Context())
@@ -115,7 +118,7 @@ func (api *Router) SavePlayQueue(r *http.Request) (*responses.Subsonic, error) {
 	}
 
 	repo := api.ds.PlayQueue(r.Context())
-	err = repo.Store(pq)
+	err := repo.Store(pq)
 	if err != nil {
 		return nil, err
 	}

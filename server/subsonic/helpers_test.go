@@ -2,6 +2,7 @@ package subsonic
 
 import (
 	"github.com/navidrome/navidrome/model"
+	"github.com/navidrome/navidrome/server/subsonic/responses"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -26,11 +27,50 @@ var _ = Describe("helpers", func() {
 				Expect(fakePath(mf)).To(Equal("Brock Berrigan/Point Pleasant/04 - Split Decision.flac"))
 			})
 		})
-	})
-
-	Describe("mapSlashToDash", func() {
-		It("maps / to _", func() {
-			Expect(mapSlashToDash("AC/DC")).To(Equal("AC_DC"))
+		When("TrackNumber and DiscNumber are available", func() {
+			It("adds the trackNumber to the path", func() {
+				mf.TrackNumber = 4
+				mf.DiscNumber = 1
+				Expect(fakePath(mf)).To(Equal("Brock Berrigan/Point Pleasant/01-04 - Split Decision.flac"))
+			})
 		})
 	})
+
+	Describe("sanitizeSlashes", func() {
+		It("maps / to _", func() {
+			Expect(sanitizeSlashes("AC/DC")).To(Equal("AC_DC"))
+		})
+	})
+
+	Describe("buildDiscTitles", func() {
+		It("should return nil when album has no discs", func() {
+			album := model.Album{}
+			Expect(buildDiscSubtitles(album)).To(BeNil())
+		})
+
+		It("should return correct disc titles when album has discs with valid disc numbers", func() {
+			album := model.Album{
+				Discs: map[int]string{
+					1: "Disc 1",
+					2: "Disc 2",
+				},
+			}
+			expected := responses.DiscTitles{
+				{Disc: 1, Title: "Disc 1"},
+				{Disc: 2, Title: "Disc 2"},
+			}
+			Expect(buildDiscSubtitles(album)).To(Equal(expected))
+		})
+	})
+
+	DescribeTable("toItemDate",
+		func(date string, expected responses.ItemDate) {
+			Expect(toItemDate(date)).To(Equal(expected))
+		},
+		Entry("1994-02-04", "1994-02-04", responses.ItemDate{Year: 1994, Month: 2, Day: 4}),
+		Entry("1994-02", "1994-02", responses.ItemDate{Year: 1994, Month: 2}),
+		Entry("1994", "1994", responses.ItemDate{Year: 1994}),
+		Entry("19940201", "", responses.ItemDate{}),
+		Entry("", "", responses.ItemDate{}),
+	)
 })

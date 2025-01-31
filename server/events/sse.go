@@ -42,15 +42,13 @@ type (
 		username       string
 		userAgent      string
 		clientUniqueId string
+		displayString  string
 		msgC           chan message
 	}
 )
 
 func (c client) String() string {
-	if log.CurrentLevel() >= log.LevelTrace {
-		return fmt.Sprintf("%s (%s - %s - %s - %s)", c.id, c.username, c.address, c.clientUniqueId, c.userAgent)
-	}
-	return fmt.Sprintf("%s (%s - %s - %s)", c.id, c.username, c.address, c.clientUniqueId)
+	return c.displayString
 }
 
 type broker struct {
@@ -141,7 +139,6 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	// Tells Nginx to not buffer this response. See https://stackoverflow.com/a/33414096
 	w.Header().Set("X-Accel-Buffering", "no")
 
@@ -172,6 +169,12 @@ func (b *broker) subscribe(r *http.Request) client {
 		userAgent:      r.UserAgent(),
 		clientUniqueId: clientUniqueId,
 	}
+	if log.IsGreaterOrEqualTo(log.LevelTrace) {
+		c.displayString = fmt.Sprintf("%s (%s - %s - %s - %s)", c.id, c.username, c.address, c.clientUniqueId, c.userAgent)
+	} else {
+		c.displayString = fmt.Sprintf("%s (%s - %s - %s)", c.id, c.username, c.address, c.clientUniqueId)
+	}
+
 	c.msgC = make(chan message, bufferSize)
 
 	// Signal the broker that we have a new client
@@ -260,7 +263,7 @@ func sendOrDrop(client client, msg message) {
 	select {
 	case client.msgC <- msg:
 	default:
-		if log.CurrentLevel() >= log.LevelTrace {
+		if log.IsGreaterOrEqualTo(log.LevelTrace) {
 			log.Trace("Event dropped because client's channel is full", "event", msg, "client", client.String())
 		}
 	}

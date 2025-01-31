@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/navidrome/navidrome/core"
 	"github.com/navidrome/navidrome/core/artwork"
@@ -59,7 +60,7 @@ var _ = Describe("playlistImporter", func() {
 			conf.Server.PlaylistsPath = "."
 			ps = newPlaylistImporter(ds, pls, cw, "tests/fixtures/playlists")
 
-			Expect(ps.processPlaylists(ctx, "tests/fixtures/playlists")).To(Equal(int64(5)))
+			Expect(ps.processPlaylists(ctx, "tests/fixtures/playlists")).To(Equal(int64(6)))
 			Expect(ps.processPlaylists(ctx, "tests/fixtures/playlists/subfolder1")).To(Equal(int64(0)))
 		})
 
@@ -70,11 +71,16 @@ type mockedMediaFile struct {
 	model.MediaFileRepository
 }
 
-func (r *mockedMediaFile) FindByPath(s string) (*model.MediaFile, error) {
-	return &model.MediaFile{
-		ID:   "123",
-		Path: s,
-	}, nil
+func (r *mockedMediaFile) FindByPaths(paths []string) (model.MediaFiles, error) {
+	var mfs model.MediaFiles
+	for i, path := range paths {
+		mf := model.MediaFile{
+			ID:   strconv.Itoa(i),
+			Path: path,
+		}
+		mfs = append(mfs, mf)
+	}
+	return mfs, nil
 }
 
 type mockedPlaylist struct {

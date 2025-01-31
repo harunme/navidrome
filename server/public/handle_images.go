@@ -10,10 +10,10 @@ import (
 	"github.com/navidrome/navidrome/core/artwork"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
-	"github.com/navidrome/navidrome/utils"
+	"github.com/navidrome/navidrome/utils/req"
 )
 
-func (p *Router) handleImages(w http.ResponseWriter, r *http.Request) {
+func (pub *Router) handleImages(w http.ResponseWriter, r *http.Request) {
 	// If context is already canceled, discard request without further processing
 	if r.Context().Err() != nil {
 		return
@@ -21,20 +21,24 @@ func (p *Router) handleImages(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	id := r.URL.Query().Get(":id")
+
+	p := req.Params(r)
+	id, _ := p.String(":id")
 	if id == "" {
+		log.Warn(r, "No id provided")
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
 	artId, err := decodeArtworkID(id)
 	if err != nil {
+		log.Error(r, "Error decoding artwork id", "id", id, err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	size := utils.ParamInt(r, "size", 0)
+	size := p.IntOr("size", 0)
 
-	imgReader, lastUpdate, err := p.artwork.Get(ctx, artId, size)
+	imgReader, lastUpdate, err := pub.artwork.Get(ctx, artId, size, false)
 	switch {
 	case errors.Is(err, context.Canceled):
 		return

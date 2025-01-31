@@ -3,13 +3,13 @@
 package cmd
 
 import (
-	"sync"
-
 	"github.com/google/wire"
 	"github.com/navidrome/navidrome/core"
 	"github.com/navidrome/navidrome/core/agents/lastfm"
 	"github.com/navidrome/navidrome/core/agents/listenbrainz"
 	"github.com/navidrome/navidrome/core/artwork"
+	"github.com/navidrome/navidrome/core/metrics"
+	"github.com/navidrome/navidrome/core/playback"
 	"github.com/navidrome/navidrome/db"
 	"github.com/navidrome/navidrome/persistence"
 	"github.com/navidrome/navidrome/scanner"
@@ -23,6 +23,7 @@ import (
 var allProviders = wire.NewSet(
 	core.Set,
 	artwork.Set,
+	server.New,
 	subsonic.New,
 	nativeapi.New,
 	public.New,
@@ -30,12 +31,13 @@ var allProviders = wire.NewSet(
 	lastfm.NewRouter,
 	listenbrainz.NewRouter,
 	events.GetBroker,
+	scanner.GetInstance,
 	db.Db,
+	metrics.NewPrometheusInstance,
 )
 
 func CreateServer(musicFolder string) *server.Server {
 	panic(wire.Build(
-		server.New,
 		allProviders,
 	))
 }
@@ -49,7 +51,6 @@ func CreateNativeAPIRouter() *nativeapi.Router {
 func CreateSubsonicAPIRouter() *subsonic.Router {
 	panic(wire.Build(
 		allProviders,
-		GetScanner,
 	))
 }
 
@@ -71,22 +72,26 @@ func CreateListenBrainzRouter() *listenbrainz.Router {
 	))
 }
 
-// Scanner must be a Singleton
-var (
-	onceScanner     sync.Once
-	scannerInstance scanner.Scanner
-)
-
-func GetScanner() scanner.Scanner {
-	onceScanner.Do(func() {
-		scannerInstance = createScanner()
-	})
-	return scannerInstance
-}
-
-func createScanner() scanner.Scanner {
+func CreateInsights() metrics.Insights {
 	panic(wire.Build(
 		allProviders,
-		scanner.New,
+	))
+}
+
+func CreatePrometheus() metrics.Metrics {
+	panic(wire.Build(
+		allProviders,
+	))
+}
+
+func GetScanner() scanner.Scanner {
+	panic(wire.Build(
+		allProviders,
+	))
+}
+
+func GetPlaybackServer() playback.PlaybackServer {
+	panic(wire.Build(
+		allProviders,
 	))
 }

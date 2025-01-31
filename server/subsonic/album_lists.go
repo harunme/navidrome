@@ -6,16 +6,18 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/navidrome/navidrome/core/scrobbler"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/server/subsonic/filter"
 	"github.com/navidrome/navidrome/server/subsonic/responses"
-	"github.com/navidrome/navidrome/utils"
-	"github.com/navidrome/navidrome/utils/number"
+	"github.com/navidrome/navidrome/utils/req"
+	"github.com/navidrome/navidrome/utils/slice"
 )
 
 func (api *Router) getAlbumList(r *http.Request) (model.Albums, int64, error) {
-	typ, err := requiredParamString(r, "type")
+	p := req.Params(r)
+	typ, err := p.String("type")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -39,17 +41,17 @@ func (api *Router) getAlbumList(r *http.Request) (model.Albums, int64, error) {
 	case "highest":
 		opts = filter.AlbumsByRating()
 	case "byGenre":
-		genre, err := requiredParamString(r, "genre")
+		genre, err := p.String("genre")
 		if err != nil {
 			return nil, 0, err
 		}
 		opts = filter.AlbumsByGenre(genre)
 	case "byYear":
-		fromYear, err := requiredParamInt(r, "fromYear")
+		fromYear, err := p.Int("fromYear")
 		if err != nil {
 			return nil, 0, err
 		}
-		toYear, err := requiredParamInt(r, "toYear")
+		toYear, err := p.Int("toYear")
 		if err != nil {
 			return nil, 0, err
 		}
@@ -59,18 +61,18 @@ func (api *Router) getAlbumList(r *http.Request) (model.Albums, int64, error) {
 		return nil, 0, newError(responses.ErrorGeneric, "type '%s' not implemented", typ)
 	}
 
-	opts.Offset = utils.ParamInt(r, "offset", 0)
-	opts.Max = number.Min(utils.ParamInt(r, "size", 10), 500)
+	opts.Offset = p.IntOr("offset", 0)
+	opts.Max = min(p.IntOr("size", 10), 500)
 	albums, err := api.ds.Album(r.Context()).GetAllWithoutGenres(opts)
 
 	if err != nil {
-		log.Error(r, "Error retrieving albums", "error", err)
+		log.Error(r, "Error retrieving albums", err)
 		return nil, 0, newError(responses.ErrorGeneric, "internal error")
 	}
 
 	count, err := api.ds.Album(r.Context()).CountAll(opts)
 	if err != nil {
-		log.Error(r, "Error counting albums", "error", err)
+		log.Error(r, "Error counting albums", err)
 		return nil, 0, newError(responses.ErrorGeneric, "internal error")
 	}
 
@@ -86,7 +88,9 @@ func (api *Router) GetAlbumList(w http.ResponseWriter, r *http.Request) (*respon
 	w.Header().Set("x-total-count", strconv.Itoa(int(count)))
 
 	response := newResponse()
-	response.AlbumList = &responses.AlbumList{Album: childrenFromAlbums(r.Context(), albums)}
+	response.AlbumList = &responses.AlbumList{
+		Album: slice.MapWithArg(albums, r.Context(), childFromAlbum),
+	}
 	return response, nil
 }
 
@@ -99,7 +103,9 @@ func (api *Router) GetAlbumList2(w http.ResponseWriter, r *http.Request) (*respo
 	w.Header().Set("x-total-count", strconv.FormatInt(pageCount, 10))
 
 	response := newResponse()
-	response.AlbumList2 = &responses.AlbumList{Album: childrenFromAlbums(r.Context(), albums)}
+	response.AlbumList2 = &responses.AlbumList{
+		Album: slice.MapWithArg(albums, r.Context(), childFromAlbum),
+	}
 	return response, nil
 }
 
@@ -108,25 +114,25 @@ func (api *Router) GetStarred(r *http.Request) (*responses.Subsonic, error) {
 	options := filter.Starred()
 	artists, err := api.ds.Artist(ctx).GetAll(options)
 	if err != nil {
-		log.Error(r, "Error retrieving starred artists", "error", err)
+		log.Error(r, "Error retrieving starred artists", err)
 		return nil, err
 	}
 	albums, err := api.ds.Album(ctx).GetAllWithoutGenres(options)
 	if err != nil {
-		log.Error(r, "Error retrieving starred albums", "error", err)
+		log.Error(r, "Error retrieving starred albums", err)
 		return nil, err
 	}
 	mediaFiles, err := api.ds.MediaFile(ctx).GetAll(options)
 	if err != nil {
-		log.Error(r, "Error retrieving starred mediaFiles", "error", err)
+		log.Error(r, "Error retrieving starred mediaFiles", err)
 		return nil, err
 	}
 
 	response := newResponse()
 	response.Starred = &responses.Starred{}
-	response.Starred.Artist = toArtists(r, artists)
-	response.Starred.Album = childrenFromAlbums(r.Context(), albums)
-	response.Starred.Song = childrenFromMediaFiles(r.Context(), mediaFiles)
+	response.Starred.Artist = slice.MapWithArg(artists, r, toArtist)
+	response.Starred.Album = slice.MapWithArg(albums, ctx, childFromAlbum)
+	response.Starred.Song = slice.MapWithArg(mediaFiles, ctx, childFromMediaFile)
 	return response, nil
 }
 
@@ -145,55 +151,59 @@ func (api *Router) GetNowPlaying(r *http.Request) (*responses.Subsonic, error) {
 	ctx := r.Context()
 	npInfo, err := api.scrobbler.GetNowPlaying(ctx)
 	if err != nil {
-		log.Error(r, "Error retrieving now playing list", "error", err)
+		log.Error(r, "Error retrieving now playing list", err)
 		return nil, err
 	}
 
 	response := newResponse()
 	response.NowPlaying = &responses.NowPlaying{}
-	response.NowPlaying.Entry = make([]responses.NowPlayingEntry, len(npInfo))
-	for i, np := range npInfo {
-		response.NowPlaying.Entry[i].Child = childFromMediaFile(ctx, np.MediaFile)
-		response.NowPlaying.Entry[i].UserName = np.Username
-		response.NowPlaying.Entry[i].MinutesAgo = int32(time.Since(np.Start).Minutes())
-		response.NowPlaying.Entry[i].PlayerId = int32(i + 1) // Fake numeric playerId, it does not seem to be used for anything
-		response.NowPlaying.Entry[i].PlayerName = np.PlayerName
-	}
+	var i int32
+	response.NowPlaying.Entry = slice.Map(npInfo, func(np scrobbler.NowPlayingInfo) responses.NowPlayingEntry {
+		return responses.NowPlayingEntry{
+			Child:      childFromMediaFile(ctx, np.MediaFile),
+			UserName:   np.Username,
+			MinutesAgo: int32(time.Since(np.Start).Minutes()),
+			PlayerId:   i + 1, // Fake numeric playerId, it does not seem to be used for anything
+			PlayerName: np.PlayerName,
+		}
+	})
 	return response, nil
 }
 
 func (api *Router) GetRandomSongs(r *http.Request) (*responses.Subsonic, error) {
-	size := number.Min(utils.ParamInt(r, "size", 10), 500)
-	genre := utils.ParamString(r, "genre")
-	fromYear := utils.ParamInt(r, "fromYear", 0)
-	toYear := utils.ParamInt(r, "toYear", 0)
+	p := req.Params(r)
+	size := min(p.IntOr("size", 10), 500)
+	genre, _ := p.String("genre")
+	fromYear := p.IntOr("fromYear", 0)
+	toYear := p.IntOr("toYear", 0)
 
 	songs, err := api.getSongs(r.Context(), 0, size, filter.SongsByRandom(genre, fromYear, toYear))
 	if err != nil {
-		log.Error(r, "Error retrieving random songs", "error", err)
+		log.Error(r, "Error retrieving random songs", err)
 		return nil, err
 	}
 
 	response := newResponse()
 	response.RandomSongs = &responses.Songs{}
-	response.RandomSongs.Songs = childrenFromMediaFiles(r.Context(), songs)
+	response.RandomSongs.Songs = slice.MapWithArg(songs, r.Context(), childFromMediaFile)
 	return response, nil
 }
 
 func (api *Router) GetSongsByGenre(r *http.Request) (*responses.Subsonic, error) {
-	count := number.Min(utils.ParamInt(r, "count", 10), 500)
-	offset := utils.ParamInt(r, "offset", 0)
-	genre := utils.ParamString(r, "genre")
+	p := req.Params(r)
+	count := min(p.IntOr("count", 10), 500)
+	offset := p.IntOr("offset", 0)
+	genre, _ := p.String("genre")
 
 	songs, err := api.getSongs(r.Context(), offset, count, filter.SongsByGenre(genre))
 	if err != nil {
-		log.Error(r, "Error retrieving random songs", "error", err)
+		log.Error(r, "Error retrieving random songs", err)
 		return nil, err
 	}
 
 	response := newResponse()
 	response.SongsByGenre = &responses.Songs{}
-	response.SongsByGenre.Songs = childrenFromMediaFiles(r.Context(), songs)
+	response.SongsByGenre.Songs = slice.MapWithArg(songs, r.Context(), childFromMediaFile)
 	return response, nil
 }
 
